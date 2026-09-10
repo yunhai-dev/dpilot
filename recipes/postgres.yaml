@@ -1,0 +1,71 @@
+name: "postgres"
+version: "1.0.0"
+description: "Deploy PostgreSQL relational database with persistent storage"
+category: "service"
+author: "dpilot"
+
+inputs:
+  - id: "container_name"
+    type: "text"
+    prompt: "What is the container name?"
+    default: "my-postgres"
+    required: true
+
+  - id: "port"
+    type: "number"
+    prompt: "Host port to expose"
+    default: 5432
+    required: true
+
+  - id: "db_name"
+    type: "text"
+    prompt: "Initial database name"
+    default: "app_db"
+    required: true
+
+  - id: "db_user"
+    type: "text"
+    prompt: "Database superuser"
+    default: "postgres"
+    required: true
+
+  - id: "db_password"
+    type: "password"
+    prompt: "Database superuser password"
+    required: true
+
+  - id: "enable_volume"
+    type: "confirm"
+    prompt: "Persist data with Docker volume?"
+    default: true
+
+  - id: "version_tag"
+    type: "select"
+    prompt: "Select PostgreSQL version"
+    options: ["17-alpine", "16-alpine", "15-alpine"]
+    default: "16-alpine"
+
+steps:
+  - name: "Pull Docker Image"
+    command: "docker pull postgres:{{ version_tag }}"
+    show_output: false
+
+  - name: "Remove existing container (if any)"
+    command: "docker rm -f {{ container_name }} 2>/dev/null || true"
+    allow_failure: true
+
+  - name: "Start PostgreSQL Container"
+    command: >
+      docker run -d
+      --name {{ container_name }}
+      -p {{ port }}:5432
+      -e POSTGRES_DB={{ db_name }}
+      -e POSTGRES_USER={{ db_user }}
+      -e POSTGRES_PASSWORD={{ db_password }}
+      {% if enable_volume %}-v {{ container_name }}_data:/var/lib/postgresql/data{% endif %}
+      --restart unless-stopped
+      postgres:{{ version_tag }}
+
+  - name: "Verify Container Health"
+    command: "docker ps --filter name={{ container_name }} --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'"
+    show_output: true

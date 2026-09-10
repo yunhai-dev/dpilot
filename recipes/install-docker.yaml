@@ -1,0 +1,78 @@
+name: "install-docker"
+version: "1.0.0"
+description: "Install Docker Engine and Docker Compose on Linux (Ubuntu/Debian/CentOS/RHEL)"
+category: "system"
+author: "dpilot"
+
+inputs:
+  - id: "install_compose"
+    type: "confirm"
+    prompt: "Install Docker Compose plugin?"
+    default: true
+
+  - id: "add_current_user"
+    type: "confirm"
+    prompt: "Add current user to docker group (avoid sudo for docker commands)?"
+    default: true
+
+  - id: "mirror_source"
+    type: "select"
+    prompt: "Select Docker installation source / mirror"
+    options: ["official (get.docker.com)", "aliyun mirror (China mainland)"]
+    default: "official (get.docker.com)"
+
+steps:
+  - name: "Check Root or Sudo Privilege"
+    command: |
+      if [ "$(id -u)" -ne 0 ] && ! command -v sudo >/dev/null 2>&1; then
+        echo "Error: Root or sudo privilege is required to install Docker." >&2
+        exit 1
+      fi
+    show_output: false
+
+  - name: "Download and Run Docker Installation Script"
+    command: |
+      SUDO=""
+      if [ "$(id -u)" -ne 0 ]; then
+        SUDO="sudo"
+      fi
+      {% if mirror_source == "aliyun mirror (China mainland)" %}
+      curl -fsSL https://get.docker.com | $SUDO bash -s docker --mirror Aliyun
+      {% else %}
+      curl -fsSL https://get.docker.com | $SUDO sh
+      {% endif %}
+    show_output: true
+
+  - name: "Enable and Start Docker Service"
+    command: |
+      SUDO=""
+      if [ "$(id -u)" -ne 0 ]; then
+        SUDO="sudo"
+      fi
+      if command -v systemctl >/dev/null 2>&1; then
+        $SUDO systemctl enable --now docker
+      elif command -v service >/dev/null 2>&1; then
+        $SUDO service docker start
+      fi
+    show_output: false
+
+  - name: "Configure User Permissions"
+    command: |
+      {% if add_current_user %}
+      SUDO=""
+      if [ "$(id -u)" -ne 0 ]; then
+        SUDO="sudo"
+      fi
+      CURRENT_USER="${SUDO_USER:-$USER}"
+      if [ -n "$CURRENT_USER" ] && [ "$CURRENT_USER" != "root" ]; then
+        $SUDO usermod -aG docker "$CURRENT_USER" || true
+        echo "User $CURRENT_USER added to docker group. Note: You may need to log out and back in for group changes to take effect."
+      fi
+      {% else %}
+      echo "Skipping user group configuration."
+      {% endif %}
+    show_output: true
+
+  - name: "Verify Docker Installation"
+    command: "docker --version && docker compose version"
+    show_output: true

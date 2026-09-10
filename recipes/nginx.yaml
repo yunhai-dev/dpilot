@@ -1,0 +1,57 @@
+name: "nginx"
+version: "1.0.0"
+description: "High-performance Nginx web server or reverse proxy container"
+category: "service"
+author: "dpilot"
+
+inputs:
+  - id: "container_name"
+    type: "text"
+    prompt: "What is the container name?"
+    default: "my-nginx"
+    required: true
+
+  - id: "http_port"
+    type: "number"
+    prompt: "HTTP host port to expose"
+    default: 80
+    required: true
+
+  - id: "enable_https"
+    type: "confirm"
+    prompt: "Enable HTTPS port exposure (443)?"
+    default: false
+
+  - id: "https_port"
+    type: "number"
+    prompt: "HTTPS host port to expose"
+    default: 443
+    required: false
+
+  - id: "version_tag"
+    type: "select"
+    prompt: "Select Nginx version tag"
+    options: ["alpine", "latest", "mainline-alpine"]
+    default: "alpine"
+
+steps:
+  - name: "Pull Nginx Image"
+    command: "docker pull nginx:{{ version_tag }}"
+    show_output: false
+
+  - name: "Remove existing container (if any)"
+    command: "docker rm -f {{ container_name }} 2>/dev/null || true"
+    allow_failure: true
+
+  - name: "Start Nginx Container"
+    command: >
+      docker run -d
+      --name {{ container_name }}
+      -p {{ http_port }}:80
+      {% if enable_https %}-p {{ https_port }}:443{% endif %}
+      --restart unless-stopped
+      nginx:{{ version_tag }}
+
+  - name: "Verify Container Health"
+    command: "docker ps --filter name={{ container_name }} --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'"
+    show_output: true

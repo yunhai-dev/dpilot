@@ -1,0 +1,45 @@
+name: "uptime-kuma"
+version: "1.0.0"
+description: "Self-hosted monitoring tool like Uptime Robot with fancy UI"
+category: "service"
+author: "dpilot"
+
+inputs:
+  - id: "container_name"
+    type: "text"
+    prompt: "What is the container name?"
+    default: "uptime-kuma"
+    required: true
+
+  - id: "port"
+    type: "number"
+    prompt: "Host port to access Uptime Kuma dashboard"
+    default: 3001
+    required: true
+
+  - id: "enable_volume"
+    type: "confirm"
+    prompt: "Persist configuration data with Docker volume?"
+    default: true
+
+steps:
+  - name: "Pull Uptime Kuma Image"
+    command: "docker pull louislam/uptime-kuma:1"
+    show_output: false
+
+  - name: "Remove existing container (if any)"
+    command: "docker rm -f {{ container_name }} 2>/dev/null || true"
+    allow_failure: true
+
+  - name: "Start Uptime Kuma Container"
+    command: >
+      docker run -d
+      --name {{ container_name }}
+      -p {{ port }}:3001
+      {% if enable_volume %}-v {{ container_name }}_data:/app/data{% endif %}
+      --restart unless-stopped
+      louislam/uptime-kuma:1
+
+  - name: "Verify Container Health"
+    command: "docker ps --filter name={{ container_name }} --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'"
+    show_output: true

@@ -1,0 +1,63 @@
+name: "redis"
+version: "1.0.0"
+description: "In-memory key-value data store with optional persistence and password"
+category: "service"
+author: "dpilot"
+
+inputs:
+  - id: "container_name"
+    type: "text"
+    prompt: "What is the container name?"
+    default: "my-redis"
+    required: true
+
+  - id: "port"
+    type: "number"
+    prompt: "Host port to expose"
+    default: 6379
+    required: true
+
+  - id: "require_password"
+    type: "confirm"
+    prompt: "Enable password protection for Redis?"
+    default: false
+
+  - id: "password"
+    type: "password"
+    prompt: "Redis password"
+    required: false
+
+  - id: "enable_volume"
+    type: "confirm"
+    prompt: "Persist data with Docker volume?"
+    default: true
+
+  - id: "version_tag"
+    type: "select"
+    prompt: "Select Redis version tag"
+    options: ["7-alpine", "6-alpine", "latest"]
+    default: "7-alpine"
+
+steps:
+  - name: "Pull Redis Image"
+    command: "docker pull redis:{{ version_tag }}"
+    show_output: false
+
+  - name: "Remove existing container (if any)"
+    command: "docker rm -f {{ container_name }} 2>/dev/null || true"
+    allow_failure: true
+
+  - name: "Start Redis Container"
+    command: >
+      docker run -d
+      --name {{ container_name }}
+      -p {{ port }}:6379
+      {% if enable_volume %}-v {{ container_name }}_data:/data{% endif %}
+      --restart unless-stopped
+      redis:{{ version_tag }}
+      redis-server
+      {% if require_password and password != "" %}--requirepass {{ password }}{% endif %}
+
+  - name: "Verify Container Health"
+    command: "docker ps --filter name={{ container_name }} --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'"
+    show_output: true
