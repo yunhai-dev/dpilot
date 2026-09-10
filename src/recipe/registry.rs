@@ -5,7 +5,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 static EMBEDDED_RECIPES: Dir = include_dir!("$CARGO_MANIFEST_DIR/recipes");
-
+const DEFAULT_GITHUB_REPO: &str = "yunhai-dev/dpilot";
+const DEFAULT_BRANCH: &str = "main";
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct RecipeSummary {
@@ -16,70 +17,125 @@ pub struct RecipeSummary {
     pub source: RecipeSource,
 }
 
-#[allow(dead_code)]
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum RecipeSource {
-    Embedded,
-    Local(PathBuf),
     Remote(String),
+    Local(PathBuf),
 }
 
 pub struct RecipeRegistry;
 
 impl RecipeRegistry {
-    /// Load all available recipes from embedded binary and local ./recipes directories.
     pub fn list_available() -> Vec<RecipeSummary> {
-        let mut summaries = Vec::new();
-        let mut seen = std::collections::HashSet::new();
+        // Try fetching recipe list from GitHub repository contents API
+        if let Ok(remote_summaries) = Self::fetch_github_recipes_list() {
+            if !remote_summaries.is_empty() {
+                return remote_summaries;
+            }
+        }
 
-        // 1. Scan embedded recipes
+        // Fallback: embedded recipes when network is unavailable
+        let mut summaries = Vec::new();
         for file in EMBEDDED_RECIPES.files() {
             if let Ok(content) = std::str::from_utf8(file.contents()) {
                 if let Ok(recipe) = Recipe::from_yaml_str(content) {
-                    seen.insert(recipe.name.clone());
+                    let recipe_name = recipe.name.clone();
                     summaries.push(RecipeSummary {
                         name: recipe.name,
                         version: recipe.version,
                         description: recipe.description,
                         category: recipe.category,
-                        source: RecipeSource::Embedded,
+                        source: RecipeSource::Remote(format!(
+                            "https://raw.githubusercontent.com/{}/{}/recipes/{}.yaml",
+                            DEFAULT_GITHUB_REPO, DEFAULT_BRANCH, recipe_name
+                        )),
                     });
                 }
             }
         }
+        summaries.sort_by(|a, b| a.name.cmp(&b.name));
+        summaries
+    }
 
-        // 2. Scan local ./recipes directory if exists
-        let local_dir = Path::new("./recipes");
-        if local_dir.is_dir() {
-            if let Ok(entries) = fs::read_dir(local_dir) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path.is_file()
-                        && (path.extension().and_then(|s| s.to_str()) == Some("yaml")
-                            || path.extension().and_then(|s| s.to_str()) == Some("yml"))
-                    {
-                        if let Ok(content) = fs::read_to_string(&path) {
-                            if let Ok(recipe) = Recipe::from_yaml_str(&content) {
-                                if !seen.contains(&recipe.name) {
-                                    seen.insert(recipe.name.clone());
-                                    summaries.push(RecipeSummary {
-                                        name: recipe.name,
-                                        version: recipe.version,
-                                        description: recipe.description,
-                                        category: recipe.category,
-                                        source: RecipeSource::Local(path),
-                                    });
-                                }
-                            }
+    fn fetch_github_recipes_list() -> Result<Vec<RecipeSummary>> {
+        let body = std::thread::spawn(|| -> Result<String> {
+            let client = reqwest::blocking::Client::builder()
+                .timeout(std::time::Duration::from_secs(5))
+                .user_agent("dpilot-cli")
+                .build()?;
+
+            let api_url = format!(
+                "https://api.github.com/repos/{}/contents/recipes?ref={}",
+                DEFAULT_GITHUB_REPO, DEFAULT_BRANCH
+            );
+
+            let resp = client.get(&api_url).send()?;
+            if !resp.status().is_success() {
+                bail!("GitHub API returned status: {}", resp.status());
+            }
+            Ok(resp.text()?)
+        })
+        .join()
+        .map_err(|_| anyhow::anyhow!("Thread panicked"))??;
+        #[derive(serde::Deserialize)]
+        struct GithubContentItem {
+            name: String,
+            download_url: Option<String>,
+        }
+
+        let items: Vec<GithubContentItem> = serde_json::from_str(&body)?;
+        let mut summaries = Vec::new();
+        let urls: Vec<String> = items
+            .into_iter()
+            .filter(|item| item.name.ends_with(".yaml") || item.name.ends_with(".yml"))
+            .map(|item| {
+                item.download_url.unwrap_or_else(|| {
+                    format!(
+                        "https://raw.githubusercontent.com/{}/{}/recipes/{}",
+                        DEFAULT_GITHUB_REPO, DEFAULT_BRANCH, item.name
+                    )
+                })
+            })
+            .collect();
+
+        let fetched_contents = std::thread::spawn(move || -> Vec<(String, String)> {
+            let client = match reqwest::blocking::Client::builder()
+                .timeout(std::time::Duration::from_secs(5))
+                .user_agent("dpilot-cli")
+                .build()
+            {
+                Ok(c) => c,
+                Err(_) => return Vec::new(),
+            };
+
+            let mut results = Vec::new();
+            for url in urls {
+                if let Ok(resp) = client.get(&url).send() {
+                    if resp.status().is_success() {
+                        if let Ok(text) = resp.text() {
+                            results.push((url, text));
                         }
                     }
                 }
             }
-        }
+            results
+        })
+        .join()
+        .unwrap_or_default();
 
+        for (raw_url, body) in fetched_contents {
+            if let Ok(recipe) = Recipe::from_yaml_str(&body) {
+                summaries.push(RecipeSummary {
+                    name: recipe.name,
+                    version: recipe.version,
+                    description: recipe.description,
+                    category: recipe.category,
+                    source: RecipeSource::Remote(raw_url),
+                });
+            }
+        }
         summaries.sort_by(|a, b| a.name.cmp(&b.name));
-        summaries
+        Ok(summaries)
     }
 
     /// Resolve a recipe by name, file path, or remote URL/repo.
@@ -109,64 +165,58 @@ impl RecipeRegistry {
             return Ok((recipe, RecipeSource::Remote(identifier.to_string())));
         }
 
-        // Case 3: Embedded recipes
-        let embedded_filename = if identifier.ends_with(".yaml") || identifier.ends_with(".yml") {
-            identifier.to_string()
-        } else {
-            format!("{}.yaml", identifier)
-        };
+        // Case 3: Fetch directly from GitHub raw content
+        let clean_name = identifier
+            .trim_end_matches(".yaml")
+            .trim_end_matches(".yml");
+        let github_raw_url = format!(
+            "https://raw.githubusercontent.com/{}/{}/recipes/{}.yaml",
+            DEFAULT_GITHUB_REPO, DEFAULT_BRANCH, clean_name
+        );
 
+        if let Ok(recipe) = Self::fetch_remote(&github_raw_url) {
+            return Ok((recipe, RecipeSource::Remote(github_raw_url)));
+        }
+
+        // Fallback: embedded recipes when network is unavailable
+        let embedded_filename = format!("{}.yaml", clean_name);
         if let Some(file) = EMBEDDED_RECIPES.get_file(&embedded_filename) {
             let content = std::str::from_utf8(file.contents())
                 .context("Embedded recipe is not valid UTF-8")?;
             let recipe = Recipe::from_yaml_str(content)
                 .with_context(|| format!("Failed to parse embedded recipe {}", identifier))?;
-            return Ok((recipe, RecipeSource::Embedded));
+            return Ok((recipe, RecipeSource::Remote(format!("embedded:{}", clean_name))));
         }
 
-        // Case 4: Local recipes directory ./recipes/<name>.yaml
-        let local_path = PathBuf::from(format!("recipes/{}", embedded_filename));
-        if local_path.exists() {
-            let content = fs::read_to_string(&local_path)
-                .with_context(|| format!("Failed to read local recipe at {:?}", local_path))?;
-            let recipe = Recipe::from_yaml_str(&content)
-                .with_context(|| format!("Failed to parse local recipe at {:?}", local_path))?;
-            return Ok((recipe, RecipeSource::Local(local_path)));
-        }
-
-        // Case 5: User config directory ~/.dpilot/recipes/<name>.yaml
-        if let Some(home) = std::env::var_os("HOME") {
-            let user_recipe = PathBuf::from(home)
-                .join(".dpilot")
-                .join("recipes")
-                .join(&embedded_filename);
-            if user_recipe.exists() {
-                let content = fs::read_to_string(&user_recipe)
-                    .with_context(|| format!("Failed to read user recipe at {:?}", user_recipe))?;
-                let recipe = Recipe::from_yaml_str(&content)
-                    .with_context(|| format!("Failed to parse user recipe at {:?}", user_recipe))?;
-                return Ok((recipe, RecipeSource::Local(user_recipe)));
-            }
-        }
-
-        bail!("Recipe '{}' not found in embedded registry, ./recipes/, or remote.", identifier)
+        bail!(
+            "Recipe '{}' not found on GitHub ({}) or embedded registry.",
+            identifier,
+            github_raw_url
+        )
     }
 
     /// Fetch recipe YAML from remote HTTP(S) URL
     pub fn fetch_remote(url: &str) -> Result<Recipe> {
-        let client = reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(10))
-            .build()?;
-        let resp = client
-            .get(url)
-            .send()
-            .with_context(|| format!("Failed to fetch remote recipe from {}", url))?;
+        let url_owned = url.to_string();
+        let body = std::thread::spawn(move || -> Result<String> {
+            let client = reqwest::blocking::Client::builder()
+                .timeout(std::time::Duration::from_secs(10))
+                .user_agent("dpilot-cli")
+                .build()?;
+            let resp = client
+                .get(&url_owned)
+                .send()
+                .with_context(|| format!("Failed to fetch remote recipe from {}", url_owned))?;
 
-        if !resp.status().is_success() {
-            bail!("Remote recipe request failed with status: {}", resp.status());
-        }
+            if !resp.status().is_success() {
+                bail!("Remote recipe request failed with status: {}", resp.status());
+            }
 
-        let body = resp.text()?;
+            Ok(resp.text()?)
+        })
+        .join()
+        .map_err(|_| anyhow::anyhow!("Thread panicked fetching remote recipe"))??;
+
         let recipe = Recipe::from_yaml_str(&body)
             .with_context(|| format!("Failed to parse YAML from remote recipe at {}", url))?;
         Ok(recipe)
