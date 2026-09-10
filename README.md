@@ -1,152 +1,125 @@
 # dpilot (Deployment Pilot)
 
-A fast, interactive CLI pilot in Rust designed to streamline deploying containerized services, databases, and setting up system environments with beautiful prompts and declarative YAML recipes.
-
-Inspired by modern frontend scaffolding CLI experiences (e.g. `create-next-app` / `clack`).
+Rust 编写的现代交互式 CLI 工具，通过类 `create-next-app` 风格的问答向导与声明式 YAML 配方，优雅地完成多平台容器服务部署、数据库配置与系统环境初始化。
 
 ---
 
-## Features
+## 核心特性
 
-- **Interactive Question Wizard**: Dynamic prompts (`text`, `number`, `password`, `confirm`, `select`) with defaults, validators, and password hiding.
-- **Embedded & Portable**: All pre-bundled service recipes are baked directly into the binary at compile time via `include_dir!` — zero external dependencies needed for out-of-the-box services.
-- **Declarative YAML Recipes**: Configure inputs, parameter validation, and templated shell commands using Minijinja (`{{ var }}` and `{% if %}`).
-- **Both Services & System Provisioning**: Deploy Docker services (`postgres`, `redis`, `nginx`, `uptime-kuma`) or run system-level software setup (like automated `install-docker` for Linux).
-- **Rich Execution Engine**: Step-by-step progress spinners (`indicatif`), live indented execution logs, time tracking, failure handling, and red error summaries.
-- **Multiple Recipe Sources**:
-  - Embedded binary recipes (`dpilot run <name>`)
-  - Local custom files (`dpilot run -f my-service.yaml`)
-  - Project directory (`./recipes/<name>.yaml`)
-  - User configuration directory (`~/.dpilot/recipes/<name>.yaml`)
-  - Remote HTTP/HTTPS URLs (`dpilot run https://example.com/recipe.yaml`)
-- **Dry-Run Mode**: Inspect and verify fully-rendered commands before executing anything on your machine.
+- 🌟 **纯中文交互问答向导**：支持 `文本 (text)`、`数值 (number)`、`密码隐匿 (password)`、`布尔确认 (confirm)`、`下拉单选 (select)` 等多种输入控件，支持默认值、必填校验与密码掩码。
+- 📦 **直接联动 GitHub 远程仓库**：运行时直接通过 GitHub API / Raw 获取最新配方，新加配方即刻生效；同时内嵌默认配方，断网自动降级。
+- 🖥 **多操作系统与架构兼容**：配方和单步骤支持 `platforms` 属性（如 `["linux"]`、`["linux", "darwin", "windows"]`），智能检测宿主机环境并在不支持时发出提醒或跳过特定步骤。
+- 📜 **强大的 Minijinja 模板引擎**：支持使用 `{{ var }}` 与 `{% if ... %}` 动态生成命令、环境变量与挂载参数。
+- 📊 **可视化步进执行引擎**：包含实时 Spinner 旋转指示器、多行日志缩进输出、步骤耗时统计、忽略非致命失败与错误详情框。
+- 🔍 **安全演练模式 (`--dry-run`)**：在不触碰系统环境的前提下，预览所有经变量替换与条件计算后的真实 Shell 执行命令。
 
 ---
 
-## Installation
+## 快速安装
 
-### Prerequisites
-- [Rust](https://rustup.rs/) (edition 2024 / 1.85+)
-- Docker (for deploying containerized recipes)
-
-### Build from Source
+### 源码编译安装
 ```bash
 git clone https://github.com/yunhai-dev/dpilot.git
 cd dpilot
 cargo build --release
 
-# Optional: Install to PATH
+# 可选：安装到系统 PATH
 cargo install --path .
 ```
 
 ---
 
-## Quick Start
+## 常用命令
 
-### 1. Interactive Selection (No Args)
-Simply run `dpilot` to enter an interactive menu of all available recipes:
+### 1. 交互式选择菜单（无参数）
+直接运行 `dpilot`，进入交互式配方选择界面：
 ```bash
 dpilot
 ```
 
-### 2. List Available Recipes
+### 2. 查看所有可用配方列表
 ```bash
 dpilot list
 ```
-Output:
-```text
-Available Services & Tooling Recipes
-
-NAME               CATEGORY   VERSION    DESCRIPTION                             
-────────────────────────────────────────────────────────────────────────────────
-install-docker     system     1.0.0      Install Docker Engine and Docker Compose on Linux (Ubuntu/Debian/CentOS/RHEL)
-nginx              service    1.0.0      High-performance Nginx web server or reverse proxy container
-postgres           service    1.0.0      Deploy PostgreSQL relational database with persistent storage
-redis              service    1.0.0      In-memory key-value data store with optional persistence and password
-uptime-kuma        service    1.0.0      Self-hosted monitoring tool like Uptime Robot with fancy UI
-```
-
-You can also filter by category:
+按类别过滤：
 ```bash
-dpilot list -c system
-dpilot list -c service
+dpilot list -c system   # 仅查看系统工具配置 (如 Docker 安装)
+dpilot list -c service  # 仅查看容器化服务
 ```
 
-### 3. Deploy a Built-in Service
-Run a specific service directly:
+### 3. 运行指定配方
 ```bash
 dpilot run postgres
 ```
 
-### 4. Dry-Run Mode
-Preview generated commands without executing them:
+### 4. 演练预览命令（不实际执行）
 ```bash
 dpilot run postgres --dry-run
 ```
 
-### 5. Run a Custom Recipe File
+### 5. 执行本地自定义 YAML 配方
 ```bash
-dpilot run -f ./my-custom-service.yaml
+dpilot run -f ./my-service.yaml
 ```
 
-### 6. Validate Recipe Syntax
-Check the integrity of any recipe YAML file before execution:
+### 6. 校验配方文件完整性与语法
 ```bash
-dpilot validate -f ./recipes/install-docker.yaml
+dpilot validate -f ./recipes/nginx.yaml
 ```
 
 ---
 
-## Recipe Specification
+## 配方 YAML 规范
 
-Each recipe is a single declarative YAML file. Below is an example:
+每个配方为独立的 YAML 文件：
 
 ```yaml
 name: "postgres"
 version: "1.0.0"
-description: "Deploy PostgreSQL relational database with persistent storage"
+description: "部署 PostgreSQL 关系型数据库 (支持数据持久化与版本选择)"
 category: "service"
+platforms: ["linux", "darwin", "windows"]
 author: "dpilot"
 
 inputs:
   - id: "container_name"
     type: "text"
-    prompt: "What is the container name?"
+    prompt: "容器名称是什么？"
     default: "my-postgres"
     required: true
 
   - id: "port"
     type: "number"
-    prompt: "Host port to expose"
+    prompt: "映射的主机端口"
     default: 5432
     required: true
 
   - id: "db_password"
     type: "password"
-    prompt: "Database superuser password"
+    prompt: "超级用户密码"
     required: true
 
   - id: "enable_volume"
     type: "confirm"
-    prompt: "Persist data with Docker volume?"
+    prompt: "是否使用 Docker 数据卷持久化存储？"
     default: true
 
   - id: "version_tag"
     type: "select"
-    prompt: "Select PostgreSQL version"
+    prompt: "选择 PostgreSQL 版本"
     options: ["17-alpine", "16-alpine", "15-alpine"]
     default: "16-alpine"
 
 steps:
-  - name: "Pull Docker Image"
+  - name: "拉取 PostgreSQL 镜像"
     command: "docker pull postgres:{{ version_tag }}"
     show_output: false
 
-  - name: "Remove existing container (if any)"
+  - name: "清理同名旧容器 (若存在)"
     command: "docker rm -f {{ container_name }} 2>/dev/null || true"
     allow_failure: true
 
-  - name: "Start PostgreSQL Container"
+  - name: "启动 PostgreSQL 容器"
     command: >
       docker run -d
       --name {{ container_name }}
@@ -156,23 +129,13 @@ steps:
       --restart unless-stopped
       postgres:{{ version_tag }}
 
-  - name: "Verify Container Health"
-    command: "docker ps --filter name={{ container_name }}"
+  - name: "检查容器运行状态"
+    command: "docker ps --filter name={{ container_name }} --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'"
     show_output: true
 ```
 
-### Input Types
-
-| Type | Description | Inquire Widget |
-| :--- | :--- | :--- |
-| `text` | Free-form string input with optional validation and default value | `inquire::Text` |
-| `number` | Integer input (port, memory limits, etc.) | `inquire::CustomType<i64>` |
-| `password` | Masked string input for sensitive credentials | `inquire::Password` |
-| `confirm` | Boolean question (Yes/No) | `inquire::Confirm` |
-| `select` | Dropdown choice from a predefined list of options | `inquire::Select` |
-
 ---
 
-## License
+## 开源协议
 
 [MIT](LICENSE)

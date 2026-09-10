@@ -1,53 +1,54 @@
 name: "redis"
 version: "1.0.0"
-description: "In-memory key-value data store with optional persistence and password"
+description: "内存键值数据库 (支持数据持久化存储与密码认证)"
 category: "service"
+platforms: ["linux", "darwin", "windows"]
 author: "dpilot"
 
 inputs:
   - id: "container_name"
     type: "text"
-    prompt: "What is the container name?"
+    prompt: "容器名称是什么？"
     default: "my-redis"
     required: true
 
   - id: "port"
     type: "number"
-    prompt: "Host port to expose"
+    prompt: "映射的主机端口"
     default: 6379
     required: true
 
   - id: "require_password"
     type: "confirm"
-    prompt: "Enable password protection for Redis?"
+    prompt: "是否为 Redis 启用访问密码保护？"
     default: false
 
   - id: "password"
     type: "password"
-    prompt: "Redis password"
+    prompt: "Redis 访问密码"
     required: false
 
   - id: "enable_volume"
     type: "confirm"
-    prompt: "Persist data with Docker volume?"
+    prompt: "是否使用 Docker 数据卷持久化存储？"
     default: true
 
   - id: "version_tag"
     type: "select"
-    prompt: "Select Redis version tag"
+    prompt: "选择 Redis 版本镜像标签"
     options: ["7-alpine", "6-alpine", "latest"]
     default: "7-alpine"
 
 steps:
-  - name: "Pull Redis Image"
+  - name: "拉取 Redis 镜像"
     command: "docker pull redis:{{ version_tag }}"
     show_output: false
 
-  - name: "Remove existing container (if any)"
+  - name: "清理同名旧容器 (若存在)"
     command: "docker rm -f {{ container_name }} 2>/dev/null || true"
     allow_failure: true
 
-  - name: "Start Redis Container"
+  - name: "启动 Redis 容器"
     command: >
       docker run -d
       --name {{ container_name }}
@@ -58,6 +59,6 @@ steps:
       redis-server
       {% if require_password and password != "" %}--requirepass {{ password }}{% endif %}
 
-  - name: "Verify Container Health"
+  - name: "检查容器运行状态"
     command: "docker ps --filter name={{ container_name }} --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'"
     show_output: true

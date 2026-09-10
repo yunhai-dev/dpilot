@@ -1,37 +1,38 @@
 name: "uptime-kuma"
 version: "1.0.0"
-description: "Self-hosted monitoring tool like Uptime Robot with fancy UI"
+description: "自托管服务可用性监控看板 (类似 Uptime Robot，自带精美 UI)"
 category: "service"
+platforms: ["linux", "darwin", "windows"]
 author: "dpilot"
 
 inputs:
   - id: "container_name"
     type: "text"
-    prompt: "What is the container name?"
+    prompt: "容器名称是什么？"
     default: "uptime-kuma"
     required: true
 
   - id: "port"
     type: "number"
-    prompt: "Host port to access Uptime Kuma dashboard"
+    prompt: "映射的主机端口 (访问 Uptime Kuma 看板)"
     default: 3001
     required: true
 
   - id: "enable_volume"
     type: "confirm"
-    prompt: "Persist configuration data with Docker volume?"
+    prompt: "是否使用 Docker 数据卷持久化监控配置数据？"
     default: true
 
 steps:
-  - name: "Pull Uptime Kuma Image"
+  - name: "拉取 Uptime Kuma 镜像"
     command: "docker pull louislam/uptime-kuma:1"
     show_output: false
 
-  - name: "Remove existing container (if any)"
+  - name: "清理同名旧容器 (若存在)"
     command: "docker rm -f {{ container_name }} 2>/dev/null || true"
     allow_failure: true
 
-  - name: "Start Uptime Kuma Container"
+  - name: "启动 Uptime Kuma 容器"
     command: >
       docker run -d
       --name {{ container_name }}
@@ -40,6 +41,6 @@ steps:
       --restart unless-stopped
       louislam/uptime-kuma:1
 
-  - name: "Verify Container Health"
+  - name: "检查容器运行状态"
     command: "docker ps --filter name={{ container_name }} --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'"
     show_output: true

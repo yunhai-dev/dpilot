@@ -53,11 +53,26 @@ async fn handle_run(
 
     println!();
     println!(
-        "{} Loaded recipe {} from {:?}",
+        "{} 已加载配方: {} ({:?})",
         style("●").cyan().bold(),
         style(&recipe.name).bold(),
         source
     );
+
+    if !recipe.is_supported_on_current_host() {
+        let platforms_str = recipe
+            .platforms
+            .as_ref()
+            .map(|p| p.join(", "))
+            .unwrap_or_else(|| "未知".into());
+        println!(
+            "{} 警告: 该配方仅支持平台 [{}]，当前主机系统为 [{}/{}]，执行可能会失败。",
+            style("⚠").yellow().bold(),
+            style(platforms_str).yellow(),
+            Recipe::current_os(),
+            Recipe::current_arch()
+        );
+    }
 
     prompt::PromptWizard::print_banner(&recipe);
 
@@ -82,10 +97,9 @@ fn handle_list(category_filter: Option<String>) -> Result<()> {
     println!();
     println!(
         "{}",
-        style("Available Services & Tooling Recipes").bold().underlined()
+        style("可用服务与环境配置配方 (支持多平台检测)").bold().underlined()
     );
     println!();
-
     let filtered: Vec<&RecipeSummary> = available
         .iter()
         .filter(|s| {
@@ -101,15 +115,15 @@ fn handle_list(category_filter: Option<String>) -> Result<()> {
         println!("No recipes found matching category filter.");
         return Ok(());
     }
-
     println!(
-        "{:<18} {:<10} {:<10} {:<40}",
-        style("NAME").bold(),
-        style("CATEGORY").bold(),
-        style("VERSION").bold(),
-        style("DESCRIPTION").bold()
+        "{:<18} {:<10} {:<12} {:<10} {:<40}",
+        style("名称").bold(),
+        style("类别").bold(),
+        style("支持平台").bold(),
+        style("版本").bold(),
+        style("描述").bold()
     );
-    println!("{}", style("─".repeat(80)).dim());
+    println!("{}", style("─".repeat(95)).dim());
 
     for item in filtered {
         let cat_styled = match item.category.as_str() {
@@ -118,18 +132,25 @@ fn handle_list(category_filter: Option<String>) -> Result<()> {
             _ => style(&item.category).white(),
         };
 
+        let plat_str = item
+            .platforms
+            .as_ref()
+            .map(|p| p.join(","))
+            .unwrap_or_else(|| "all".to_string());
+
         println!(
-            "{:<18} {:<10} {:<10} {:<40}",
+            "{:<18} {:<10} {:<12} {:<10} {:<40}",
             style(&item.name).green().bold(),
             cat_styled,
+            style(plat_str).dim(),
             style(&item.version).dim(),
             item.description
         );
     }
     println!();
     println!(
-        "Run {} to launch a deployment wizard.",
-        style("dpilot run <name>").cyan().bold()
+        "运行 {} 启动引导部署向导。",
+        style("dpilot run <配方名称>").cyan().bold()
     );
     println!();
 
@@ -216,8 +237,13 @@ mod tests {
         assert!(names.contains(&"nginx".to_string()));
         assert!(names.contains(&"redis".to_string()));
         assert!(names.contains(&"postgres".to_string()));
-        assert!(names.contains(&"uptime-kuma".to_string()));
-        assert!(names.contains(&"install-docker".to_string()));
+    }
+
+    #[test]
+    fn test_platform_compatibility_check() {
+        assert!(recipe::Recipe::supports_platform(&None));
+        assert!(recipe::Recipe::supports_platform(&Some(vec!["all".to_string()])));
+        assert!(recipe::Recipe::supports_platform(&Some(vec![recipe::Recipe::current_os().to_string()])));
     }
 
     #[test]

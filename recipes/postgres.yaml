@@ -1,60 +1,61 @@
 name: "postgres"
 version: "1.0.0"
-description: "Deploy PostgreSQL relational database with persistent storage"
+description: "部署 PostgreSQL 关系型数据库 (支持数据持久化与版本选择)"
 category: "service"
+platforms: ["linux", "darwin", "windows"]
 author: "dpilot"
 
 inputs:
   - id: "container_name"
     type: "text"
-    prompt: "What is the container name?"
+    prompt: "容器名称是什么？"
     default: "my-postgres"
     required: true
 
   - id: "port"
     type: "number"
-    prompt: "Host port to expose"
+    prompt: "映射的主机端口"
     default: 5432
     required: true
 
   - id: "db_name"
     type: "text"
-    prompt: "Initial database name"
+    prompt: "初始数据库名称"
     default: "app_db"
     required: true
 
   - id: "db_user"
     type: "text"
-    prompt: "Database superuser"
+    prompt: "超级用户名"
     default: "postgres"
     required: true
 
   - id: "db_password"
     type: "password"
-    prompt: "Database superuser password"
+    prompt: "超级用户密码"
     required: true
 
   - id: "enable_volume"
     type: "confirm"
-    prompt: "Persist data with Docker volume?"
+    prompt: "是否使用 Docker 数据卷持久化存储？"
     default: true
 
   - id: "version_tag"
     type: "select"
-    prompt: "Select PostgreSQL version"
+    prompt: "选择 PostgreSQL 版本"
     options: ["17-alpine", "16-alpine", "15-alpine"]
     default: "16-alpine"
 
 steps:
-  - name: "Pull Docker Image"
+  - name: "拉取 PostgreSQL 镜像"
     command: "docker pull postgres:{{ version_tag }}"
     show_output: false
 
-  - name: "Remove existing container (if any)"
+  - name: "清理同名旧容器 (若存在)"
     command: "docker rm -f {{ container_name }} 2>/dev/null || true"
     allow_failure: true
 
-  - name: "Start PostgreSQL Container"
+  - name: "启动 PostgreSQL 容器"
     command: >
       docker run -d
       --name {{ container_name }}
@@ -66,6 +67,6 @@ steps:
       --restart unless-stopped
       postgres:{{ version_tag }}
 
-  - name: "Verify Container Health"
+  - name: "检查容器运行状态"
     command: "docker ps --filter name={{ container_name }} --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'"
     show_output: true

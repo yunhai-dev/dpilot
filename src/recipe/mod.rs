@@ -32,6 +32,8 @@ pub struct StepSpec {
     pub name: String,
     pub command: String,
     #[serde(default)]
+    pub platforms: Option<Vec<String>>,
+    #[serde(default)]
     pub working_dir: Option<String>,
     #[serde(default)]
     pub env: Option<HashMap<String, String>>,
@@ -40,7 +42,6 @@ pub struct StepSpec {
     #[serde(default = "default_show_output")]
     pub show_output: Option<bool>,
 }
-
 fn default_allow_failure() -> Option<bool> {
     Some(false)
 }
@@ -58,12 +59,13 @@ pub struct Recipe {
     #[serde(default = "default_category")]
     pub category: String,
     #[serde(default)]
+    pub platforms: Option<Vec<String>>,
+    #[serde(default)]
     pub author: Option<String>,
     #[serde(default)]
     pub inputs: Vec<InputSpec>,
     pub steps: Vec<StepSpec>,
 }
-
 fn default_version() -> String {
     "1.0.0".to_string()
 }
@@ -75,6 +77,41 @@ fn default_category() -> String {
 impl Recipe {
     pub fn from_yaml_str(yaml_str: &str) -> Result<Self, serde_yaml::Error> {
         serde_yaml::from_str(yaml_str)
+    }
+
+    pub fn current_os() -> &'static str {
+        std::env::consts::OS
+    }
+
+    pub fn current_arch() -> &'static str {
+        std::env::consts::ARCH
+    }
+
+    /// Check if target platform matches list of allowed platform identifiers (e.g. linux, darwin, windows, linux/arm64)
+    pub fn supports_platform(platforms: &Option<Vec<String>>) -> bool {
+        let platforms = match platforms {
+            Some(p) if !p.is_empty() => p,
+            _ => return true, // No restriction specified
+        };
+
+        let os = Self::current_os();
+        let arch = Self::current_arch();
+        let os_arch = format!("{}/{}", os, arch);
+
+        platforms.iter().any(|p| {
+            let p_lower = p.to_lowercase();
+            p_lower == "all"
+                || p_lower == os
+                || p_lower == arch
+                || p_lower == os_arch
+                // Alias aliases like macos -> darwin
+                || (p_lower == "macos" && os == "darwin")
+                || (p_lower == "mac" && os == "darwin")
+        })
+    }
+
+    pub fn is_supported_on_current_host(&self) -> bool {
+        Self::supports_platform(&self.platforms)
     }
 }
 

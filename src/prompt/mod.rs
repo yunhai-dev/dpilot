@@ -7,12 +7,12 @@ use serde_json::{Map, Value};
 pub struct PromptWizard;
 
 impl PromptWizard {
-    /// Print a stylish header banner for the selected recipe
+    /// 打印当前配方的美化头部信息
     pub fn print_banner(recipe: &Recipe) {
         println!();
         println!(
             "{}",
-            style(format!("◆ Deploying: {} (v{})", recipe.name, recipe.version))
+            style(format!("◆ 正在配置配方: {} (v{})", recipe.name, recipe.version))
                 .cyan()
                 .bold()
         );
@@ -21,12 +21,18 @@ impl PromptWizard {
             style(format!("│ {}", recipe.description)).dim()
         );
         if let Some(author) = &recipe.author {
-            println!("{}", style(format!("│ Author: {}", author)).dim());
+            println!("{}", style(format!("│ 作者: {}", author)).dim());
+        }
+        if let Some(platforms) = &recipe.platforms {
+            println!(
+                "{}",
+                style(format!("│ 适用平台: {}", platforms.join(", "))).dim()
+            );
         }
         println!("{}", style("│").dim());
     }
 
-    /// Ask user questions according to the Recipe's inputs spec
+    /// 根据 Recipe 的 inputs 定义提示用户输入
     pub fn collect_inputs(recipe: &Recipe) -> Result<Value> {
         let mut context = Map::new();
 
@@ -55,7 +61,7 @@ impl PromptWizard {
                     text_prompt = text_prompt.with_validator(|ans: &str| {
                         if ans.trim().is_empty() {
                             Ok(inquire::validator::Validation::Invalid(
-                                "This field cannot be empty".into(),
+                                "此输入项不能为空".into(),
                             ))
                         } else {
                             Ok(inquire::validator::Validation::Valid)
@@ -93,7 +99,7 @@ impl PromptWizard {
                     pass_prompt = pass_prompt.with_validator(|ans: &str| {
                         if ans.trim().is_empty() {
                             Ok(inquire::validator::Validation::Invalid(
-                                "Password cannot be empty".into(),
+                                "密码不能为空".into(),
                             ))
                         } else {
                             Ok(inquire::validator::Validation::Valid)
@@ -144,10 +150,10 @@ impl PromptWizard {
         }
     }
 
-    /// Display summary of selected options and ask user to confirm deployment
+    /// 显示配置参数汇总并请求用户确认部署
     pub fn confirm_summary(recipe: &Recipe, values: &Value) -> Result<bool> {
         println!("{}", style("│").dim());
-        println!("{}", style("┌─ Configuration Summary ──────────────────────").cyan());
+        println!("{}", style("┌─ 配置参数汇总 ────────────────────────────────").cyan());
 
         if let Value::Object(map) = values {
             for input in &recipe.inputs {
@@ -160,7 +166,7 @@ impl PromptWizard {
                         }
                     }
                     Some(Value::Number(n)) => n.to_string(),
-                    Some(Value::Bool(b)) => if *b { "yes".to_string() } else { "no".to_string() },
+                    Some(Value::Bool(b)) => if *b { "是".to_string() } else { "否".to_string() },
                     _ => "-".to_string(),
                 };
 
@@ -176,7 +182,7 @@ impl PromptWizard {
         println!("{}", style("└──────────────────────────────────────────────").cyan());
         println!();
 
-        let confirm = Confirm::new("Proceed with deployment?")
+        let confirm = Confirm::new("确认以上配置并开始部署吗？")
             .with_default(true)
             .prompt()?;
 

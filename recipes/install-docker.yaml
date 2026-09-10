@@ -1,49 +1,50 @@
 name: "install-docker"
 version: "1.0.0"
-description: "Install Docker Engine and Docker Compose on Linux (Ubuntu/Debian/CentOS/RHEL)"
+description: "在 Linux (Ubuntu/Debian/CentOS/RHEL) 上一键安装 Docker Engine 与 Docker Compose"
 category: "system"
+platforms: ["linux"]
 author: "dpilot"
 
 inputs:
   - id: "install_compose"
     type: "confirm"
-    prompt: "Install Docker Compose plugin?"
+    prompt: "是否安装 Docker Compose 插件？"
     default: true
 
   - id: "add_current_user"
     type: "confirm"
-    prompt: "Add current user to docker group (avoid sudo for docker commands)?"
+    prompt: "是否将当前用户添加到 docker 用户组（免 sudo 执行 docker 命令）？"
     default: true
 
   - id: "mirror_source"
     type: "select"
-    prompt: "Select Docker installation source / mirror"
-    options: ["official (get.docker.com)", "aliyun mirror (China mainland)"]
-    default: "official (get.docker.com)"
+    prompt: "请选择 Docker 安装源 / 镜像加速源"
+    options: ["官方源 (get.docker.com)", "阿里云镜像源 (中国大陆加速)"]
+    default: "官方源 (get.docker.com)"
 
 steps:
-  - name: "Check Root or Sudo Privilege"
+  - name: "检查 Root 或 Sudo 权限"
     command: |
       if [ "$(id -u)" -ne 0 ] && ! command -v sudo >/dev/null 2>&1; then
-        echo "Error: Root or sudo privilege is required to install Docker." >&2
+        echo "错误: 安装 Docker 需要 root 或 sudo 权限。" >&2
         exit 1
       fi
     show_output: false
 
-  - name: "Download and Run Docker Installation Script"
+  - name: "下载并执行 Docker 官方安装脚本"
     command: |
       SUDO=""
       if [ "$(id -u)" -ne 0 ]; then
         SUDO="sudo"
       fi
-      {% if mirror_source == "aliyun mirror (China mainland)" %}
+      {% if mirror_source == "阿里云镜像源 (中国大陆加速)" %}
       curl -fsSL https://get.docker.com | $SUDO bash -s docker --mirror Aliyun
       {% else %}
       curl -fsSL https://get.docker.com | $SUDO sh
       {% endif %}
     show_output: true
 
-  - name: "Enable and Start Docker Service"
+  - name: "启用并启动 Docker 系统服务"
     command: |
       SUDO=""
       if [ "$(id -u)" -ne 0 ]; then
@@ -56,7 +57,7 @@ steps:
       fi
     show_output: false
 
-  - name: "Configure User Permissions"
+  - name: "配置用户权限组"
     command: |
       {% if add_current_user %}
       SUDO=""
@@ -66,13 +67,13 @@ steps:
       CURRENT_USER="${SUDO_USER:-$USER}"
       if [ -n "$CURRENT_USER" ] && [ "$CURRENT_USER" != "root" ]; then
         $SUDO usermod -aG docker "$CURRENT_USER" || true
-        echo "User $CURRENT_USER added to docker group. Note: You may need to log out and back in for group changes to take effect."
+        echo "用户 $CURRENT_USER 已加入 docker 用户组。提示：可能需要重新登录终端使权限生效。"
       fi
       {% else %}
-      echo "Skipping user group configuration."
+      echo "跳过用户组配置。"
       {% endif %}
     show_output: true
 
-  - name: "Verify Docker Installation"
+  - name: "验证 Docker 与 Compose 安装状态"
     command: "docker --version && docker compose version"
     show_output: true

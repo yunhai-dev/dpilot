@@ -21,7 +21,7 @@ impl ExecutionEngine {
         println!();
         println!(
             "{}",
-            style(format!("🚀 Starting execution: {} step(s)", total_steps))
+            style(format!("🚀 开始执行部署: 共 {} 个步骤", total_steps))
                 .bold()
                 .green()
         );
@@ -29,6 +29,20 @@ impl ExecutionEngine {
 
         for (idx, step) in recipe.steps.iter().enumerate() {
             let step_num = idx + 1;
+
+            // 检查步骤级别平台限制
+            if !Recipe::supports_platform(&step.platforms) {
+                println!(
+                    "{} [{}/{}] {} {}",
+                    style("↷").dim(),
+                    step_num,
+                    total_steps,
+                    style(&step.name).dim(),
+                    style(format!("(跳过：不支持当前系统 {})", Recipe::current_os())).dim()
+                );
+                continue;
+            }
+
             let rendered_cmd = TemplateEngine::render_str(&step.command, context)?;
 
             if dry_run {
@@ -52,14 +66,14 @@ impl ExecutionEngine {
         if dry_run {
             println!(
                 "{}",
-                style("✔ Dry run completed. No commands were executed.")
+                style("✔ 演练模式执行完成。未在系统执行任何真实命令。")
                     .yellow()
                     .bold()
             );
         } else {
             println!(
                 "{}",
-                style(format!("✔ Successfully deployed {}!", recipe.name))
+                style(format!("✔ 配方 [{}] 已成功部署完成！", recipe.name))
                     .green()
                     .bold()
             );
@@ -89,7 +103,7 @@ impl ExecutionEngine {
         pb.set_message(format!("{}", style(&step.name).bold()));
         pb.enable_steady_tick(Duration::from_millis(80));
 
-        // Create shell command
+        // 根据操作系统选用对应 Shell
         #[cfg(target_os = "windows")]
         let mut cmd = {
             let mut c = Command::new("cmd");
@@ -121,14 +135,14 @@ impl ExecutionEngine {
             Err(e) => {
                 pb.finish_and_clear();
                 eprintln!(
-                    "{} [{}/{}] Failed to spawn process for step '{}': {}",
+                    "{} [{}/{}] 步骤 '{}' 创建进程失败: {}",
                     style("✖").red().bold(),
                     step_num,
                     total_steps,
                     step.name,
                     e
                 );
-                bail!("Process spawn failed: {}", e);
+                bail!("进程创建失败: {}", e);
             }
         };
 
@@ -192,7 +206,7 @@ impl ExecutionEngine {
                 step_num,
                 total_steps,
                 style(&step.name).yellow(),
-                style(format!("(failed with {}, ignored)", status)).dim()
+                style(format!("(执行失败退出码 {}, 已按配置忽略)", status)).dim()
             );
         } else {
             pb.finish_and_clear();
@@ -202,11 +216,11 @@ impl ExecutionEngine {
                 step_num,
                 total_steps,
                 style(&step.name).red().bold(),
-                style(format!("(failed with {})", status)).red()
+                style(format!("(失败退出状态码: {})", status)).red()
             );
 
             if !show_output && !stderr_lines.is_empty() {
-                println!("{}", style("┌─ Error Output ───────────────────────────────").red());
+                println!("{}", style("┌─ 错误详情输出 ───────────────────────────────").red());
                 for err_line in stderr_lines.iter().rev().take(15).rev() {
                     println!("{} {}", style("│").red(), err_line);
                 }
@@ -214,7 +228,7 @@ impl ExecutionEngine {
             }
 
             bail!(
-                "Step '{}' failed with exit status: {}",
+                "步骤 '{}' 执行失败，退出状态码: {}",
                 step.name,
                 status
             );

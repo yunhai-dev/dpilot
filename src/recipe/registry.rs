@@ -14,6 +14,7 @@ pub struct RecipeSummary {
     pub version: String,
     pub description: String,
     pub category: String,
+    pub platforms: Option<Vec<String>>,
     pub source: RecipeSource,
 }
 
@@ -45,6 +46,7 @@ impl RecipeRegistry {
                         version: recipe.version,
                         description: recipe.description,
                         category: recipe.category,
+                        platforms: recipe.platforms.clone(),
                         source: RecipeSource::Remote(format!(
                             "https://raw.githubusercontent.com/{}/{}/recipes/{}.yaml",
                             DEFAULT_GITHUB_REPO, DEFAULT_BRANCH, recipe_name
@@ -130,6 +132,7 @@ impl RecipeRegistry {
                     version: recipe.version,
                     description: recipe.description,
                     category: recipe.category,
+                    platforms: recipe.platforms.clone(),
                     source: RecipeSource::Remote(raw_url),
                 });
             }
