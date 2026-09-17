@@ -19,9 +19,9 @@ jobs:
       matrix:
         include:
           - os: ubuntu-24.04
-            target: x86_64-unknown-linux-gnu
+            target: x86_64-unknown-linux-musl
           - os: ubuntu-24.04-arm
-            target: aarch64-unknown-linux-gnu
+            target: aarch64-unknown-linux-musl
           - os: macos-15-intel
             target: x86_64-apple-darwin
           - os: macos-15
@@ -37,6 +37,13 @@ jobs:
         run: |
           rustup toolchain install stable --profile minimal
           rustup target add --toolchain stable "${{ matrix.target }}"
+      - name: Install native musl toolchain
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+          echo 'CC=musl-gcc' >> "$GITHUB_ENV"
+          echo 'RUSTFLAGS=-C target-feature=+crt-static -C linker=musl-gcc' >> "$GITHUB_ENV"
       - name: Check package version
         env:
           REF_TYPE: ${{ github.ref_type }}
@@ -60,6 +67,26 @@ jobs:
         run: cargo +stable test --locked --target "${{ matrix.target }}"
       - name: Build executable
         run: cargo +stable build --locked --release --target "${{ matrix.target }}"
+      - name: Verify static Linux binary on older distributions
+        if: runner.os == 'Linux'
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          python - <<'PY'
+          import os
+          import subprocess
+          binary = f"target/{os.environ['TARGET']}/release/dpilot"
+          headers = subprocess.check_output(["readelf", "-l", binary], text=True)
+          dynamic = subprocess.check_output(["readelf", "-d", binary], text=True)
+          if "INTERP" in headers or "(NEEDED)" in dynamic:
+              raise SystemExit("Linux release must have no dynamic loader or shared-library dependencies")
+          PY
+          for image in ubuntu:22.04 alpine:3.20; do
+            docker run --rm --network none \
+              -v "$PWD/target/$TARGET/release/dpilot:/usr/local/bin/dpilot:ro" \
+              -v "$PWD/recipes:/recipes:ro" "$image" \
+              sh -ec 'dpilot --version; dpilot --help; dpilot validate -f /recipes/easytier-server.yaml'
+          done
       - name: Package and smoke test
         env:
           TARGET: ${{ matrix.target }}
