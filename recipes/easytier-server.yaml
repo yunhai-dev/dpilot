@@ -1,0 +1,136 @@
+# 参考：https://www.yhnotes.com/docs/Operations-yun-easytier-vpn/ 的公网 peer / systemd 部分。
+# 前提：已将 easytier-core 和 easytier-cli 安装到 /opt/easytier，并以 root 运行配方。
+# 网络凭据使用 EasyTier 的 [network_identity] 表，修正教程的顶层写法。
+name: "easytier-server"
+version: "1.0.0"
+description: "使用 systemctl 部署 Linux EasyTier 公网 peer 节点（需预装 EasyTier）"
+category: "service"
+platforms: ["linux"]
+author: "dpilot"
+
+inputs:
+  - id: "network_name"
+    type: "text"
+    prompt: "VPN 网络名称"
+    default: "my-home"
+    required: true
+    help: "所有接入节点必须使用相同的网络名和密钥"
+
+  - id: "network_secret"
+    type: "password"
+    prompt: "VPN 网络密钥"
+    required: true
+    help: "请使用强随机密钥；dry-run 会显示配置明文，请仅用测试密钥演练"
+
+  - id: "hostname"
+    type: "text"
+    prompt: "当前节点名称"
+    default: "cloud-node"
+    required: true
+
+  - id: "listen_port"
+    type: "number"
+    prompt: "公网 peer 监听端口（TCP 和 UDP）"
+    default: 11010
+    required: true
+
+  - id: "public_host"
+    type: "text"
+    prompt: "云服务器公网 IPv4 或域名"
+    required: true
+    help: "例如 vpn.example.com；不含协议或端口，仅用于生成接入提示"
+
+steps:
+  - name: "检查 Linux、管理员权限与 EasyTier 二进制"
+    command: |
+      set -eu
+      [ "$(uname -s)" = "Linux" ] || { printf '%s\n' '错误：本配方仅支持 Linux。' >&2; exit 1; }
+      [ "$(id -u)" -eq 0 ] || { printf '%s\n' '错误：请使用 sudo dpilot run -f recipes/easytier-server.yaml 运行。' >&2; exit 1; }
+      [ -d /run/systemd/system ] || { printf '%s\n' '错误：当前系统未运行 systemd。' >&2; exit 1; }
+      command -v systemctl >/dev/null
+      [ -x /opt/easytier/easytier-core ] && [ -x /opt/easytier/easytier-cli ] || {
+        printf '%s\n' '错误：请先将对应 Linux 架构的 easytier-core 和 easytier-cli 放入 /opt/easytier，并赋予执行权限。' >&2
+        exit 1
+      }
+      [ -c /dev/net/tun ] || { printf '%s\n' '错误：缺少 /dev/net/tun，请先在宿主机启用 TUN。' >&2; exit 1; }
+      if [ {{ listen_port }} -lt 1 ] || [ {{ listen_port }} -gt 65535 ]; then
+        printf '%s\n' '错误：监听端口必须在 1–65535 之间。' >&2
+        exit 1
+      fi
+      if [ -e /etc/easytier/easytier.toml ] || [ "$(systemctl show easytier.service --property=LoadState --value)" != "not-found" ]; then
+        printf '%s\n' '错误：已有 EasyTier 配置或服务；请先检查并备份，不会覆盖现有部署。' >&2
+        exit 1
+      fi
+    show_output: true
+
+  - name: "生成 EasyTier 服务端配置"
+    command: |
+      set -eu
+      umask 077
+      mkdir -p /etc/easytier
+      set -C
+      {% set config %}
+      hostname = "{{ hostname | replace('\\', '\\\\') | replace('"', '\\"') | replace('\n', '\\n') | replace('\r', '\\r') | replace('\t', '\\t') }}"
+      dhcp = true
+      listeners = ["tcp://0.0.0.0:{{ listen_port }}", "udp://0.0.0.0:{{ listen_port }}"]
+      rpc_portal = "127.0.0.1:15888"
+
+      [network_identity]
+      network_name = "{{ network_name | replace('\\', '\\\\') | replace('"', '\\"') | replace('\n', '\\n') | replace('\r', '\\r') | replace('\t', '\\t') }}"
+      network_secret = "{{ network_secret | replace('\\', '\\\\') | replace('"', '\\"') | replace('\n', '\\n') | replace('\r', '\\r') | replace('\t', '\\t') }}"
+      {% endset %}
+      printf '%s\n' '{{ config | replace("'", "'\"'\"'") }}' > /etc/easytier/easytier.toml
+    show_output: false
+
+  - name: "安装 systemd 服务并设置开机启动"
+    command: |
+      set -eu
+      # systemd 直接托管前台进程；不传 --daemon，也不使用 Docker。
+      umask 022
+      set -C
+      cat > /etc/systemd/system/easytier.service <<'UNIT'
+      [Unit]
+      Description=EasyTier personal VPN
+      Wants=network-online.target
+      After=network-online.target
+
+      [Service]
+      Type=simple
+      WorkingDirectory=/opt/easytier
+      ExecStart=/opt/easytier/easytier-core --disable-env-parsing -c /etc/easytier/easytier.toml
+      Restart=on-failure
+      RestartSec=5
+      UMask=0077
+
+      [Install]
+      WantedBy=multi-user.target
+      UNIT
+      systemctl daemon-reload
+      systemctl enable --now easytier.service
+    show_output: true
+
+  - name: "检查节点并显示客户端接入说明"
+    command: |
+      set -eu
+      # 等待管理 RPC 就绪，而不仅检查 systemd 是否已创建进程。
+      ready=false
+      for attempt in 1 2 3 4 5 6 7 8 9 10; do
+        if systemctl is-active --quiet easytier.service && /opt/easytier/easytier-cli -p 127.0.0.1:15888 node >/dev/null 2>&1; then
+          ready=true
+          break
+        fi
+        sleep 2
+      done
+      if [ "$ready" != true ]; then
+        printf '%s\n' '错误：EasyTier 未就绪。请运行 journalctl -u easytier.service -n 50 --no-pager 排查。' >&2
+        exit 1
+      fi
+      systemctl --no-pager --full status easytier.service
+      /opt/easytier/easytier-cli -p 127.0.0.1:15888 node
+      public_host='{{ public_host | replace("'", "'\"'\"'") }}'
+      printf '\n客户端 peer 地址：tcp://%s:{{ listen_port }}\n' "$public_host"
+      printf '%s\n' '客户端请使用相同的网络名和密钥；密钥保存在 /etc/easytier/easytier.toml，不在此处显示。'
+      printf '%s\n' '请在云安全组和主机防火墙放行 TCP/UDP {{ listen_port }}；本配方不会修改防火墙。'
+      printf '%s\n' '查看日志：sudo journalctl -u easytier.service -f'
+      printf '%s\n' '重启服务：sudo systemctl restart easytier.service'
+    show_output: true
