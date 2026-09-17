@@ -7,7 +7,7 @@ main() {
         command -v "$tool" >/dev/null 2>&1 || { printf '缺少依赖：%s\n' "$tool" >&2; exit 1; }
     done
     case "$(uname -s)" in
-        Linux) os=unknown-linux-gnu ;;
+        Linux) os=unknown-linux-musl ;;
         Darwin) os=apple-darwin ;;
         *) printf '%s\n' '仅支持 Linux/macOS；Windows 请从 Releases 下载 ZIP。' >&2; exit 1 ;;
     esac

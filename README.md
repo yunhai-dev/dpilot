@@ -42,7 +42,7 @@ less install-dpilot.sh
 sh install-dpilot.sh
 ```
 
-Linux 需兼容 Ubuntu 24.04 的 glibc 环境；旧版系统或 Alpine 请使用源码构建。Windows 请按下节下载 ZIP。
+Linux 使用静态 musl 二进制，无需系统提供特定版本的 glibc，也可用于 Alpine。Windows 请按下节下载 ZIP。
 
 ### 下载可执行文件
 
@@ -50,19 +50,19 @@ Linux 需兼容 Ubuntu 24.04 的 glibc 环境；旧版系统或 Alpine 请使用
 
 | 系统 | 文件后缀 |
 | --- | --- |
-| Linux x64 | `x86_64-unknown-linux-gnu.tar.gz` |
-| Linux ARM64 | `aarch64-unknown-linux-gnu.tar.gz` |
+| Linux x64 | `x86_64-unknown-linux-musl.tar.gz` |
+| Linux ARM64 | `aarch64-unknown-linux-musl.tar.gz` |
 | macOS Intel | `x86_64-apple-darwin.tar.gz` |
 | macOS Apple Silicon | `aarch64-apple-darwin.tar.gz` |
 | Windows x64 | `x86_64-pc-windows-msvc.zip` |
 
-Linux 构建环境为 Ubuntu 24.04，使用 glibc，不适用于 Alpine/musl 或较旧的 glibc 系统。macOS/Windows 产物暂未签名或公证。
+Linux 从 v0.1.1 起使用静态 musl 构建，不再依赖 glibc 2.39；CI 在 Ubuntu 22.04 和 Alpine 中验证运行。macOS/Windows 产物暂未签名或公证。
 
 例如 Linux x64，下载压缩包及 `SHA256SUMS` 后：
 
 ```bash
 sha256sum --ignore-missing --check SHA256SUMS
-tar -xzf dpilot-v0.1.0-x86_64-unknown-linux-gnu.tar.gz
+tar -xzf dpilot-v0.1.1-x86_64-unknown-linux-musl.tar.gz
 sudo install -m 755 dpilot /usr/local/bin/dpilot
 dpilot --version
 ```
@@ -193,13 +193,13 @@ steps:
 工作流位于 `.github/workflows/release.yml`。先更新并提交 `Cargo.toml` 与 `Cargo.lock` 中的版本，再推送同版本标签：
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.1.1
+git push origin v0.1.1
 ```
 
 标签必须与 `Cargo.toml` 的版本完全一致，例如版本 `0.2.0` 对应 `v0.2.0`。五个平台全部通过测试、构建、CLI 冒烟检查后，工作流自动创建 GitHub Release，上传压缩包和汇总校验文件 `SHA256SUMS`；带 `-` 的版本标签标记为预发布。
 
-也可在 Actions → Build and release → Run workflow 手动构建。手动运行只上传保留 14 天的 Actions artifacts，不创建 Release。
+构建与发布仅由推送 `v*` 标签触发；普通分支 push、Pull Request 和手动操作均不触发。Actions 构建产物保留 14 天，正式发布文件保留在 Releases。
 
 ---
 
