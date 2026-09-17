@@ -17,6 +17,33 @@ Rust 编写的现代交互式 CLI 工具，通过类 `create-next-app` 风格的
 
 ## 快速安装
 
+### 一键安装（Linux / macOS）
+
+无需 Rust。自动识别 x64/ARM64，下载最新正式 Release 并校验 SHA256，安装到 `~/.local/bin/dpilot`：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/yunhai-dev/dpilot/main/install.sh | sh
+```
+
+首次安装后，如果 `~/.local/bin` 尚未加入 PATH：
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+dpilot --version
+```
+
+将上述 `export` 写入 `~/.bashrc` 或 `~/.zshrc` 可永久生效。重复执行安装命令即可升级；通过 `DPILOT_INSTALL_DIR` 环境变量可指定其他可写目录。
+
+脚本会下载并执行发布的二进制。希望先审阅脚本时，可使用以下方式代替管道执行：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/yunhai-dev/dpilot/main/install.sh -o install-dpilot.sh
+less install-dpilot.sh
+sh install-dpilot.sh
+```
+
+Linux 需兼容 Ubuntu 24.04 的 glibc 环境；旧版系统或 Alpine 请使用源码构建。Windows 请按下节下载 ZIP。
+
 ### 下载可执行文件
 
 从 [GitHub Releases](https://github.com/yunhai-dev/dpilot/releases) 下载与系统匹配的压缩包，无需安装 Rust：
