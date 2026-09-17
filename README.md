@@ -17,6 +17,31 @@ Rust 编写的现代交互式 CLI 工具，通过类 `create-next-app` 风格的
 
 ## 快速安装
 
+### 下载可执行文件
+
+从 [GitHub Releases](https://github.com/yunhai-dev/dpilot/releases) 下载与系统匹配的压缩包，无需安装 Rust：
+
+| 系统 | 文件后缀 |
+| --- | --- |
+| Linux x64 | `x86_64-unknown-linux-gnu.tar.gz` |
+| Linux ARM64 | `aarch64-unknown-linux-gnu.tar.gz` |
+| macOS Intel | `x86_64-apple-darwin.tar.gz` |
+| macOS Apple Silicon | `aarch64-apple-darwin.tar.gz` |
+| Windows x64 | `x86_64-pc-windows-msvc.zip` |
+
+Linux 构建环境为 Ubuntu 24.04，使用 glibc，不适用于 Alpine/musl 或较旧的 glibc 系统。macOS/Windows 产物暂未签名或公证。
+
+例如 Linux x64，下载压缩包及 `SHA256SUMS` 后：
+
+```bash
+sha256sum --ignore-missing --check SHA256SUMS
+tar -xzf dpilot-v0.1.0-x86_64-unknown-linux-gnu.tar.gz
+sudo install -m 755 dpilot /usr/local/bin/dpilot
+dpilot --version
+```
+
+macOS 可使用 `shasum -a 256` 核对校验值；Windows 解压后直接运行 `dpilot.exe`，或将所在目录加入 PATH。
+
 ### 源码编译安装
 ```bash
 git clone https://github.com/yunhai-dev/dpilot.git
@@ -133,6 +158,21 @@ steps:
     command: "docker ps --filter name={{ container_name }} --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'"
     show_output: true
 ```
+
+---
+
+## 发布版本
+
+工作流位于 `.github/workflows/release.yml`。先更新并提交 `Cargo.toml` 与 `Cargo.lock` 中的版本，再推送同版本标签：
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+标签必须与 `Cargo.toml` 的版本完全一致，例如版本 `0.2.0` 对应 `v0.2.0`。五个平台全部通过测试、构建、CLI 冒烟检查后，工作流自动创建 GitHub Release，上传压缩包和汇总校验文件 `SHA256SUMS`；带 `-` 的版本标签标记为预发布。
+
+也可在 Actions → Build and release → Run workflow 手动构建。手动运行只上传保留 14 天的 Actions artifacts，不创建 Release。
 
 ---
 

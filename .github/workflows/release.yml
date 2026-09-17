@@ -1,0 +1,138 @@
+name: Build and release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+          - os: macos-15
+            target: aarch64-apple-darwin
+          - os: windows-2022
+            target: x86_64-pc-windows-msvc
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install stable Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup target add --toolchain stable "${{ matrix.target }}"
+      - name: Check package version
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          cargo +stable metadata --locked --no-deps --format-version 1 > metadata.json
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          metadata = json.loads(Path("metadata.json").read_text())
+          package = next(p for p in metadata["packages"] if p["name"] == "dpilot")
+          version = package["version"]
+          if os.environ["REF_TYPE"] == "tag" and os.environ["REF_NAME"] != f"v{version}":
+              raise SystemExit(f"Tag must match Cargo.toml version: v{version}")
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as output:
+              output.write(f"PACKAGE_VERSION={version}\n")
+          PY
+      - name: Test
+        run: cargo +stable test --locked --target "${{ matrix.target }}"
+      - name: Build executable
+        run: cargo +stable build --locked --release --target "${{ matrix.target }}"
+      - name: Package and smoke test
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          python - <<'PY'
+          import hashlib
+          import os
+          import subprocess
+          import tarfile
+          import zipfile
+          from pathlib import Path
+
+          target = os.environ["TARGET"]
+          version = os.environ["PACKAGE_VERSION"]
+          windows = target.endswith("windows-msvc")
+          name = "dpilot.exe" if windows else "dpilot"
+          binary = Path("target") / target / "release" / name
+          result = subprocess.check_output([str(binary), "--version"], text=True).strip()
+          if result != f"dpilot {version}":
+              raise SystemExit(f"Unexpected binary version: {result}")
+          subprocess.run([str(binary), "--help"], check=True)
+          for recipe in sorted(Path("recipes").glob("*.yaml")):
+              subprocess.run([str(binary), "validate", "-f", str(recipe)], check=True)
+
+          dist = Path("dist")
+          dist.mkdir()
+          stem = f"dpilot-v{version}-{target}"
+          archive = dist / (stem + (".zip" if windows else ".tar.gz"))
+          if windows:
+              with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as bundle:
+                  bundle.write(binary, arcname=name)
+          else:
+              binary.chmod(0o755)
+              with tarfile.open(archive, "w:gz") as bundle:
+                  bundle.add(binary, arcname=name)
+          digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+          (dist / (archive.name + ".sha256")).write_text(
+              f"{digest}  {archive.name}\n", encoding="utf-8"
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dpilot-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Publish GitHub Release
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: dpilot-*
+          merge-multiple: true
+          path: dist
+      - name: Verify archives and collect checksums
+        working-directory: dist
+        run: |
+          sha256sum --check *.sha256
+          cat *.sha256 > SHA256SUMS
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          fail_on_unmatched_files: true
+          files: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/SHA256SUMS
