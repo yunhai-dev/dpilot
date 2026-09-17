@@ -1,9 +1,8 @@
 # 参考：https://www.yhnotes.com/docs/Operations-yun-easytier-vpn/ 的公网 peer / systemd 部分。
-# 前提：已将 easytier-core 和 easytier-cli 安装到 /opt/easytier，并以 root 运行配方。
-# 网络凭据使用 EasyTier 的 [network_identity] 表，修正教程的顶层写法。
+# 自动下载安装 EasyTier 二进制并配置为 systemd 服务。
 name: "easytier-server"
-version: "1.0.0"
-description: "使用 systemctl 部署 Linux EasyTier 公网 peer 节点（需预装 EasyTier）"
+version: "1.1.0"
+description: "使用 systemctl 一键安装并部署 Linux EasyTier 公网 peer 节点"
 category: "service"
 platforms: ["linux"]
 author: "dpilot"
@@ -41,26 +40,59 @@ inputs:
     help: "例如 vpn.example.com；不含协议或端口，仅用于生成接入提示"
 
 steps:
-  - name: "检查 Linux、管理员权限与 EasyTier 二进制"
+  - name: "检查 Linux、管理员权限与基础环境"
     command: |
       set -eu
       [ "$(uname -s)" = "Linux" ] || { printf '%s\n' '错误：本配方仅支持 Linux。' >&2; exit 1; }
       [ "$(id -u)" -eq 0 ] || { printf '%s\n' '错误：请使用 sudo dpilot run -f recipes/easytier-server.yaml 运行。' >&2; exit 1; }
       [ -d /run/systemd/system ] || { printf '%s\n' '错误：当前系统未运行 systemd。' >&2; exit 1; }
-      command -v systemctl >/dev/null
-      [ -x /opt/easytier/easytier-core ] && [ -x /opt/easytier/easytier-cli ] || {
-        printf '%s\n' '错误：请先将对应 Linux 架构的 easytier-core 和 easytier-cli 放入 /opt/easytier，并赋予执行权限。' >&2
-        exit 1
-      }
+      command -v systemctl >/dev/null 2>&1 || { printf '%s\n' '错误：缺少 systemctl。' >&2; exit 1; }
+      command -v curl >/dev/null 2>&1 || { printf '%s\n' '错误：缺少 curl，请先安装：apt install -y curl 或 yum install -y curl' >&2; exit 1; }
+      command -v unzip >/dev/null 2>&1 || { printf '%s\n' '错误：缺少 unzip，请先安装：apt install -y unzip 或 yum install -y unzip' >&2; exit 1; }
       [ -c /dev/net/tun ] || { printf '%s\n' '错误：缺少 /dev/net/tun，请先在宿主机启用 TUN。' >&2; exit 1; }
       if [ {{ listen_port }} -lt 1 ] || [ {{ listen_port }} -gt 65535 ]; then
         printf '%s\n' '错误：监听端口必须在 1–65535 之间。' >&2
         exit 1
       fi
-      if [ -e /etc/easytier/easytier.toml ] || [ "$(systemctl show easytier.service --property=LoadState --value)" != "not-found" ]; then
+      if [ -e /etc/easytier/easytier.toml ] || [ "$(systemctl show easytier.service --property=LoadState --value 2>/dev/null)" != "not-found" ]; then
         printf '%s\n' '错误：已有 EasyTier 配置或服务；请先检查并备份，不会覆盖现有部署。' >&2
         exit 1
       fi
+    show_output: true
+
+  - name: "下载并安装 EasyTier 二进制到 /opt/easytier"
+    command: |
+      set -eu
+      if [ -x /opt/easytier/easytier-core ] && [ -x /opt/easytier/easytier-cli ]; then
+        printf '%s\n' '/opt/easytier 已存在可执行文件，跳过下载。'
+        exit 0
+      fi
+      case "$(uname -m)" in
+        x86_64|amd64) arch=x86_64 ;;
+        aarch64|arm64) arch=aarch64 ;;
+        *) printf '错误：不支持的 CPU 架构 %s\n' "$(uname -m)" >&2; exit 1 ;;
+      esac
+      tmp=$(mktemp -d)
+      trap 'rm -rf "$tmp"' EXIT
+      printf '正在获取 EasyTier 最新版本...\n'
+      latest_tag=$(curl -fsSL https://api.github.com/repos/EasyTier/EasyTier/releases/latest 2>/dev/null | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/' || true)
+      if [ -z "$latest_tag" ]; then
+        latest_tag="v2.6.4"
+      fi
+      zip_name="easytier-linux-${arch}-${latest_tag}.zip"
+      download_url="https://github.com/EasyTier/EasyTier/releases/download/${latest_tag}/${zip_name}"
+      printf '正在下载 %s ...\n' "$download_url"
+      curl -fSL "$download_url" -o "$tmp/$zip_name"
+      mkdir -p "$tmp/extracted"
+      unzip -q "$tmp/$zip_name" -d "$tmp/extracted"
+      # 兼容 zip 根目录或一层子目录
+      core_path=$(find "$tmp/extracted" -type f -name "easytier-core" | head -n 1)
+      cli_path=$(find "$tmp/extracted" -type f -name "easytier-cli" | head -n 1)
+      [ -n "$core_path" ] && [ -n "$cli_path" ] || { printf '%s\n' '错误：解压包中未找到 easytier-core 或 easytier-cli。' >&2; exit 1; }
+      mkdir -p /opt/easytier
+      install -m 755 "$core_path" /opt/easytier/easytier-core
+      install -m 755 "$cli_path" /opt/easytier/easytier-cli
+      printf 'EasyTier 安装完成：/opt/easytier (%s)\n' "$latest_tag"
     show_output: true
 
   - name: "生成 EasyTier 服务端配置"
@@ -85,7 +117,6 @@ steps:
   - name: "安装 systemd 服务并设置开机启动"
     command: |
       set -eu
-      # systemd 直接托管前台进程；不传 --daemon，也不使用 Docker。
       umask 022
       set -C
       cat > /etc/systemd/system/easytier.service <<'UNIT'
@@ -112,7 +143,6 @@ steps:
   - name: "检查节点并显示客户端接入说明"
     command: |
       set -eu
-      # 等待管理 RPC 就绪，而不仅检查 systemd 是否已创建进程。
       ready=false
       for attempt in 1 2 3 4 5 6 7 8 9 10; do
         if systemctl is-active --quiet easytier.service && /opt/easytier/easytier-cli -p 127.0.0.1:15888 node >/dev/null 2>&1; then
